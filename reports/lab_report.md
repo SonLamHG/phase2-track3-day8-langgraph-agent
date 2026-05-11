@@ -1,44 +1,4 @@
-"""Report generation: assembles a full lab report from metrics + a live Mermaid diagram."""
-
-from __future__ import annotations
-
-from pathlib import Path
-
-from .metrics import MetricsReport
-
-
-def _scenario_rows(metrics: MetricsReport) -> str:
-    header = (
-        "| Scenario | Expected | Actual | Success | Nodes | Retries | Interrupts | Approval req'd | Approval seen | Latency (ms) | Errors |\n"
-        "|---|---|---|:---:|---:|---:|---:|:---:|:---:|---:|---|"
-    )
-    rows = []
-    for m in metrics.scenario_metrics:
-        errs = "; ".join(m.errors) if m.errors else ""
-        rows.append(
-            f"| {m.scenario_id} | {m.expected_route} | {m.actual_route} | "
-            f"{'OK' if m.success else 'FAIL'} | {m.nodes_visited} | {m.retry_count} | "
-            f"{m.interrupt_count} | {'yes' if m.approval_required else 'no'} | "
-            f"{'yes' if m.approval_observed else 'no'} | {m.latency_ms} | {errs} |"
-        )
-    return "\n".join([header, *rows])
-
-
-def _try_mermaid() -> str | None:
-    """Attempt to render the current graph as Mermaid. Returns None if LangGraph is unavailable."""
-    try:
-        from .graph import build_graph
-
-        return build_graph().get_graph().draw_mermaid()
-    except Exception:
-        return None
-
-
-def render_report(metrics: MetricsReport, mermaid: str | None = None) -> str:
-    diagram_block = (
-        f"```mermaid\n{mermaid}\n```" if mermaid else "_Mermaid rendering unavailable in this environment._"
-    )
-    return f"""# Day 08 Lab Report — LangGraph Agentic Orchestration
+# Day 08 Lab Report — LangGraph Agentic Orchestration
 
 ## 1. Team / student
 
@@ -51,14 +11,57 @@ def render_report(metrics: MetricsReport, mermaid: str | None = None) -> str:
 The agent is a `StateGraph` with 11 nodes wired around a small set of high-leverage patterns:
 
 - **Intake / classify** at the entry — normalizes the query and assigns a route using whole-word keyword matching with strict priority `risky > tool > missing_info > error > simple`. Priority matters because a query like *"Refund failed transaction"* contains both risky and error keywords; risky must win.
-- **Retry loop** built around `evaluate`. After `tool` runs, `evaluate` inspects the latest result and emits `evaluation_result = "needs_retry"` or `"success"`. The conditional edge `evaluate -> {{retry, answer}}` is the "done?" check that distinguishes LangGraph from a linear LCEL chain.
+- **Retry loop** built around `evaluate`. After `tool` runs, `evaluate` inspects the latest result and emits `evaluation_result = "needs_retry"` or `"success"`. The conditional edge `evaluate -> {retry, answer}` is the "done?" check that distinguishes LangGraph from a linear LCEL chain.
 - **Bounded retries** via `route_after_retry`: returns `"dead_letter"` once `attempt >= max_attempts`, otherwise loops back to `tool`. This is what stops error scenarios from running forever.
 - **HITL / approval** on the risky path: `risky_action -> approval -> route_after_approval -> tool|clarify`. The `approval_node` honors `LANGGRAPH_INTERRUPT=true` for real `interrupt()`, defaulting to a mock decision so CI runs offline.
 - **Finalize** is the single sink: every terminal route reaches `finalize -> END`. Centralizing termination guarantees the graph cannot leave a thread half-done.
 
 ### Live diagram
 
-{diagram_block}
+```mermaid
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	intake(intake)
+	classify(classify)
+	answer(answer)
+	tool(tool)
+	evaluate(evaluate)
+	clarify(clarify)
+	risky_action(risky_action)
+	approval(approval)
+	retry(retry)
+	dead_letter(dead_letter)
+	finalize(finalize)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> intake;
+	answer --> finalize;
+	approval -.-> clarify;
+	approval -.-> tool;
+	clarify --> finalize;
+	classify -.-> answer;
+	classify -.-> clarify;
+	classify -.-> retry;
+	classify -.-> risky_action;
+	classify -.-> tool;
+	dead_letter --> finalize;
+	evaluate -.-> answer;
+	evaluate -.-> retry;
+	intake --> classify;
+	retry -.-> dead_letter;
+	retry -.-> tool;
+	risky_action --> approval;
+	tool --> evaluate;
+	finalize --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
+
+```
 
 ## 3. State schema
 
@@ -77,14 +80,22 @@ The agent is a `StateGraph` with 11 nodes wired around a small set of high-lever
 
 ## 4. Scenario results
 
-- Total scenarios: **{metrics.total_scenarios}**
-- Success rate: **{metrics.success_rate:.2%}**
-- Average nodes visited: **{metrics.avg_nodes_visited:.2f}**
-- Total retries across runs: **{metrics.total_retries}**
-- Total approval interrupts: **{metrics.total_interrupts}**
-- Resume verified (rebuilt graph reads back state from checkpointer): **{metrics.resume_success}**
+- Total scenarios: **7**
+- Success rate: **100.00%**
+- Average nodes visited: **6.43**
+- Total retries across runs: **3**
+- Total approval interrupts: **2**
+- Resume verified (rebuilt graph reads back state from checkpointer): **True**
 
-{_scenario_rows(metrics)}
+| Scenario | Expected | Actual | Success | Nodes | Retries | Interrupts | Approval req'd | Approval seen | Latency (ms) | Errors |
+|---|---|---|:---:|---:|---:|---:|:---:|:---:|---:|---|
+| S01_simple | simple | simple | OK | 4 | 0 | 0 | no | no | 28 |  |
+| S02_tool | tool | tool | OK | 6 | 0 | 0 | no | no | 13 |  |
+| S03_missing | missing_info | missing_info | OK | 4 | 0 | 0 | no | no | 10 |  |
+| S04_risky | risky | risky | OK | 8 | 0 | 1 | yes | yes | 16 |  |
+| S05_error | error | error | OK | 10 | 2 | 0 | no | no | 19 | transient failure attempt=1; transient failure attempt=2 |
+| S06_delete | risky | risky | OK | 8 | 0 | 1 | yes | yes | 15 |  |
+| S07_dead_letter | error | error | OK | 5 | 1 | 0 | no | no | 11 | transient failure attempt=1 |
 
 ## 5. Failure analysis
 
@@ -123,15 +134,3 @@ If we had one more day:
 3. **Parallel fan-out** for tool calls via `Send()` — e.g., on a `tool` route, fire `order_lookup` and `customer_lookup` concurrently and merge results through the `add` reducer on `tool_results`.
 4. **Time-travel debugging** — surface a CLI subcommand that lists `get_state_history(thread_id)` checkpoints and lets a developer replay from any of them. The mechanism is already there; only the UX is missing.
 5. **Stronger keyword coverage + dataset-driven evaluation** — replace the hand-curated keyword sets with an evaluation set of ~50 queries per route and tune until precision/recall both clear a threshold.
-"""
-
-
-def render_report_stub(metrics: MetricsReport) -> str:
-    """Kept for backward compatibility; delegates to the full renderer."""
-    return render_report(metrics, mermaid=_try_mermaid())
-
-
-def write_report(metrics: MetricsReport, output_path: str | Path) -> None:
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_report(metrics, mermaid=_try_mermaid()), encoding="utf-8")

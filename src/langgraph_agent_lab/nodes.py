@@ -8,6 +8,46 @@ from __future__ import annotations
 
 from .state import AgentState, ApprovalDecision, Route, make_event
 
+RISKY_KEYWORDS = {
+    "refund", "refunds", "refunded", "refunding",
+    "delete", "deletes", "deleted", "deleting", "deletion",
+    "send", "sends", "sending", "sent",
+    "cancel", "cancels", "cancelled", "canceled", "cancellation",
+    "remove", "removes", "removed", "removing", "removal",
+    "revoke", "revokes", "revoked", "revoking",
+    "wipe", "wipes", "wiped", "wiping",
+    "purge", "purges", "purged",
+    "terminate", "terminates", "terminated",
+    "disable", "disables", "disabled",
+}
+TOOL_KEYWORDS = {
+    "status", "statuses",
+    "order", "orders",
+    "lookup", "lookups",
+    "check", "checks", "checking",
+    "track", "tracks", "tracking", "tracked",
+    "find", "finds", "found",
+    "search", "searches", "searching",
+    "query", "queries",
+    "fetch", "fetches", "retrieve",
+}
+ERROR_KEYWORDS = {
+    "timeout", "timeouts", "timed",
+    "fail", "fails", "failed", "failing", "failure", "failures",
+    "error", "errors", "errored",
+    "crash", "crashes", "crashed", "crashing",
+    "unavailable",
+    "broken",
+    "unreachable",
+}
+VAGUE_PRONOUNS = {"it", "this", "that", "them", "those", "these"}
+_PUNCT = "?!.,;:'\"()[]{}"
+
+
+def _tokenize(query: str) -> set[str]:
+    """Lowercase + strip surrounding punctuation; return whole-word set."""
+    return {w.strip(_PUNCT) for w in query.lower().split() if w.strip(_PUNCT)}
+
 
 def intake_node(state: AgentState) -> dict:
     """Normalize raw query into state fields.
@@ -23,24 +63,23 @@ def intake_node(state: AgentState) -> dict:
 
 
 def classify_node(state: AgentState) -> dict:
-    """Classify the query into a route.
+    """Classify the query into a route by whole-word keyword matching.
 
-    TODO(student): replace keyword heuristics with a clear routing policy.
-    Required routes: simple, tool, missing_info, risky, error.
+    Priority: risky > tool > missing_info > error > simple.
+    Word-boundary matching avoids false positives like "sender" matching "send"
+    or "checkpoint" matching "check".
     """
-    query = state.get("query", "").lower()
-    words = query.split()
-    clean_words = [w.strip("?!.,;:") for w in words]
+    words = _tokenize(state.get("query", ""))
     route = Route.SIMPLE
     risk_level = "low"
-    if "refund" in query or "delete" in query or "send" in query:
+    if words & RISKY_KEYWORDS:
         route = Route.RISKY
         risk_level = "high"
-    elif "status" in query or "order" in query or "lookup" in query:
+    elif words & TOOL_KEYWORDS:
         route = Route.TOOL
-    elif len(clean_words) < 5 and "it" in clean_words:
+    elif len(words) < 6 and (words & VAGUE_PRONOUNS):
         route = Route.MISSING_INFO
-    elif "timeout" in query or "fail" in query:
+    elif words & ERROR_KEYWORDS:
         route = Route.ERROR
     return {
         "route": route.value,
