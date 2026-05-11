@@ -113,6 +113,13 @@ After all scenarios complete, `cli._verify_resume()` simulates a process restart
 - **Crash-resume verification** baked into the CLI: every `run-scenarios` rebuilds the graph and reads state back to prove durability.
 - **Mermaid diagram** rendered live from `graph.get_graph().draw_mermaid()` (§2). Conditional edges declare explicit path maps so the diagram shows every routing target.
 - **Latency tracking** per scenario via `time.perf_counter()` around `graph.invoke()`.
+- **Streamlit HITL UI** ([src/langgraph_agent_lab/ui.py](../src/langgraph_agent_lab/ui.py)) — sets `LANGGRAPH_INTERRUPT=true` and lets a human approve/reject risky actions. The graph pauses inside `approval_node` via `interrupt()`, the UI surfaces the proposed action + risk level, and a decision resumes the thread via `Command(resume={...})`. The UI also renders the event timeline and live SQLite checkpoint history so an operator can see exactly where the graph is and how it got there.
+
+  ![Paused awaiting approval](images/ui_paused.png)
+
+  ![Approved and completed](images/ui_completed.png)
+
+  Launch: `pip install -e ".[ui]"` then `streamlit run src/langgraph_agent_lab/ui.py`.
 
 ## 8. Improvement plan
 

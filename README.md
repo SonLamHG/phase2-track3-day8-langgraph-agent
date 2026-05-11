@@ -182,6 +182,26 @@ Pick one or more:
 
 ---
 
+## Streamlit HITL UI (bonus)
+
+The lab ships with a Streamlit page that demonstrates real `interrupt()` / `Command(resume=...)` instead of the mock approval path. Pick a scenario, click **Run**, and risky scenarios pause until you approve or reject.
+
+```bash
+pip install -e ".[ui]"
+streamlit run src/langgraph_agent_lab/ui.py
+```
+
+The UI:
+
+- Forces `LANGGRAPH_INTERRUPT=true` so `approval_node` calls `interrupt()` for real.
+- Uses its own SQLite DB at `outputs/ui_checkpoints.db`, separate from `make run-scenarios`.
+- Generates a unique `thread_id` per **Run** click so each scenario starts from a clean checkpoint.
+- Streams the event timeline and the full `get_state_history()` so you can see every persisted checkpoint.
+
+See [docs/images/ui_paused.png](docs/images/ui_paused.png) and [docs/images/ui_completed.png](docs/images/ui_completed.png) for screenshots of the paused-for-approval and resumed-after-approval states.
+
+---
+
 ## Submission checklist
 
 - [ ] All `TODO(student)` sections completed
